@@ -12,7 +12,7 @@ from datetime import datetime
 import zlib
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
@@ -36,6 +36,26 @@ DEWA_HEADER = """
    ║     NOT SYSTEM IS SAFE! 😈🔥      ║
    ╚════════════════════════════════════╝
 """
+
+# Fungsi verifikasi kode WAN
+def verify_wan_code():
+    temp_code = "GFXWRS321"  # Kode WAN yang lu tentuin
+    console.print("[cyan]Masukkan kode WAN anda:[/cyan]")
+    user_code = console.input("[yellow]Kode: [/yellow]")
+
+    # Animasi loading keren
+    with Progress(SpinnerColumn(), TextColumn("[cyan]Verifikasi kode anda...[/cyan]"), transient=True) as progress:
+        task = progress.add_task("", total=100)
+        for _ in range(100):
+            time.sleep(0.03)
+            progress.update(task, advance=1)
+
+    if user_code == temp_code:
+        console.print("[green]Kode anda berhasil! Selamat menjalankan skrip ini 😈[/green]\a")
+        return True
+    else:
+        console.print("[red]Kode anda tidak berhasil! Harap masukkan kode yang valid.[/red]")
+        return False
 
 # Bikin folder kalau belum ada
 def setup_directories():
@@ -224,6 +244,11 @@ def main_menu():
     listener_thread = threading.Thread(target=data_listener, daemon=True)
     listener_thread.start()
     public_url = start_ngrok()
+    
+    # Verifikasi kode WAN sebelum masuk menu
+    if not verify_wan_code():
+        console.print("[red]Akses ditolak! Keluar dari VIRUSDAN.[/red]\a")
+        return
     
     while True:
         console.clear()
